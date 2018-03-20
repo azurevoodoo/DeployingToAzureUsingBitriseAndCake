@@ -1,10 +1,14 @@
 #addin nuget:?package=Cake.Kudu.Client&version=0.4.0
 
-var target = Argument("target", "Deploy");
-var configuration = Argument("configuration", "Release");
-var solution = "./src/ShippedFromBitrise.sln";
-var project = "./src/ShippedFromBitrise/ShippedFromBitrise.csproj";
-var output = "./output";
+string  target          = Argument("target", "Default"),
+        configuration   = Argument("configuration", "Release"),
+        solution        = "./src/ShippedFromBitrise.sln",
+        project         = "./src/ShippedFromBitrise/ShippedFromBitrise.csproj",
+        testProject     = "./src/ShippedFromBitrise.Tests/ShippedFromBitrise.Tests.csproj",
+        output          = "./output",
+        baseUri         = EnvironmentVariable("KUDU_CLIENT_BASEURI"),
+        userName        = EnvironmentVariable("KUDU_CLIENT_USERNAME"),
+        password        = EnvironmentVariable("KUDU_CLIENT_PASSWORD");
 
 Task("Restore")
     .Does( () => {
@@ -28,8 +32,21 @@ Task("Build")
         });
 });
 
-Task("Publish")
+Task("Test")
     .IsDependentOn("Build")
+    .Does( () => {
+    DotNetCoreTest(
+        testProject,
+        new DotNetCoreTestSettings {
+            NoRestore = false,
+            NoBuild = false,
+            Configuration = configuration,
+            OutputDirectory = output
+        });
+});
+
+Task("Publish")
+    .IsDependentOn("Test")
     .Does( () => {
     DotNetCorePublish(
         project,
@@ -42,11 +59,11 @@ Task("Publish")
 
 Task("Deploy")
     .IsDependentOn("Publish")
+    .WithCriteria(
+        !string.IsNullOrEmpty(baseUri) &&
+        !string.IsNullOrEmpty(userName) &&
+        !string.IsNullOrEmpty(password))
     .Does( () => {
-    string  baseUri     = EnvironmentVariable("KUDU_CLIENT_BASEURI"),
-            userName    = EnvironmentVariable("KUDU_CLIENT_USERNAME"),
-            password    = EnvironmentVariable("KUDU_CLIENT_PASSWORD");
-
     IKuduClient kuduClient = KuduClient(
         baseUri,
         userName,
@@ -54,5 +71,8 @@ Task("Deploy")
 
     kuduClient.ZipDeployDirectory(output);
 });
+
+Task("Default")
+    .IsDependentOn("Deploy");
 
 RunTarget(target);
